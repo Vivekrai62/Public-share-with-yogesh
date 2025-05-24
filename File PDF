@@ -1,0 +1,793 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:pharma_clients_app/utils/responsive/responsive_images.dart';
+import 'package:pharma_clients_app/utils/responsive/responsive_sizes.dart';
+import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
+import 'package:provider/provider.dart';
+
+import 'package:shimmer/shimmer.dart';
+import 'package:solar_icons/solar_icons.dart';
+import '../../utils/responsive/responsive_text.dart';
+import 'addPresentationScreen.dart';
+import '../../resources/app_colors.dart'; // Ensure correct path
+import '../../resources/constant_strings.dart'; // Ensure correct path
+import '../../utils/text_style.dart'; // Ensure correct path
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http; // For fetching images from URLs
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:open_file/open_file.dart';
+import 'package:image/image.dart' as img; // Add the 'image' package for compression
+class PresentationListScreen extends StatefulWidget {
+  const PresentationListScreen({super.key});
+
+  @override
+  State<PresentationListScreen> createState() => _PresentationListScreenState();
+}
+
+class _PresentationListScreenState extends State<PresentationListScreen> {
+  TextEditingController controller = TextEditingController();
+
+  @override
+  void initState() {
+    // TODO: implement initState
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<Presentation>(context, listen: false).clearSearch();
+    });
+  }
+
+  @override
+  void dispose() {
+    // TODO: implement dispose
+    super.dispose();
+    controller.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width <= 500;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: ResponsiveText.getAppBarText(
+            context, ConstantStrings.presentationHeading),
+        automaticallyImplyLeading: true,
+        actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => AddPresentationScreen()));
+            },
+            icon: ResponsiveImages.getAppBarIcon(
+                context, SolarIconsOutline.clipboardAdd),
+          ),
+          SizedBox(width: ResponsiveSizes.iconBetweenWidth(context))
+        ],
+      ),
+      body: Column(
+        children: [
+      
+          Container(
+            margin: EdgeInsets.only(left: 10, right: 10),
+            child: TextFormField(
+              style:
+                  TextStyle(fontSize: ResponsiveText.getInputTextSize(context)),
+              controller: controller,
+              onChanged: (value) {
+                Provider.of<Presentation>(context, listen: false)
+                    .search(value.toLowerCase());
+              },
+              decoration: InputDecoration(
+                prefixIcon: ResponsiveImages.getSearchBarIcon(
+                    context, SolarIconsOutline.magnifier),
+                border: InputBorder.none,
+                hintText: "Search",
+                hintStyle: const TextStyle(color: Colors.black38),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Consumer<Presentation>(
+              builder:
+                  (BuildContext context, presentationProvider, Widget? child) {
+                return FutureBuilder(
+                  future: presentationProvider.loadPresentations(),
+                  builder: (context, snapshot) {
+                    debugPrint(
+                        'Presentation List Screen: ${presentationProvider.count}');
+                    return presentationProvider.presentations.isEmpty
+                        ? Center(
+                            child: Text('No presentations found.'),
+                          )
+                        : ListView.builder(
+                            itemCount:
+                                presentationProvider.presentations.length,
+                            itemBuilder: (context, index) {
+                              final presentation =
+                                  presentationProvider.presentations[index];
+                              return Container(
+                                margin: EdgeInsets.only(
+                                    left: 10, right: 10, top: 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(10)),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppColors.primaryColor
+                                          .withOpacity(0.3),
+                                      spreadRadius: 0.1,
+                                      blurRadius: 0.1,
+                                      offset: const Offset(0, 0),
+                                    ),
+                                  ],
+                                ),
+                                child: ListTile(
+                                  title: Text(presentation.name?.toString() ??
+                                      'No Title'),
+                                  titleTextStyle: TextStyle(
+                                    fontSize: ResponsiveText.getInputTextSize(
+                                        context),
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 0,
+                                    color: Colors.black,
+                                  ),
+                                  contentPadding:
+                                      EdgeInsets.only(left: 20, right: 0),
+                                  subtitle: TextWithStyle.productDescription(
+                                    context,
+                                    '${presentation.images?.length ?? 0} ${presentation.images?.length == 1 ? 'Slide' : 'Slides'}',
+                                  ),
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            PresentationScreen(
+                                          presentation: presentation,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.all(8.0),
+                                        child:
+                                        IconButton(
+                                            onPressed: () async {
+                                              await generateAndDownloadPdf(
+                                                  context, presentation);
+                                            },
+                                            icon: Icon(Icons.download)),
+                                      ),
+                                      GestureDetector(
+                                        child: ResponsiveImages.getAppBarIcon(
+                                            context,
+                                            SolarIconsOutline.documentAdd),
+                                        onTap: () async {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) =>
+                                                  AddPresentationScreen(
+                                                presentation: presentation,
+                                              ),
+                                            ),
+                                          );
+                                          // if (updatedPresentation != null) {
+                                          //   presentationProvider.updatePresentation(presentation.name!, updatedPresentation);
+                                          // }
+                                        },
+                                      ),
+                                      SizedBox(
+                                          width:
+                                              ResponsiveSizes.iconBetweenWidth(
+                                                  context)),
+                                      IconButton(
+                                          onPressed: () {
+                                            presentationProvider
+                                                .removePresentation(
+                                                    presentation.name!);
+                                          },
+                                          icon: ResponsiveImages.getAppBarIcon(
+                                              context,
+                                              SolarIconsOutline.trashBinTrash)),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
+  Future<void> generateAndDownloadPdf(
+      BuildContext context, PresentationData presentation) async {
+    // Show loading dialog
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          content: Row(
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text('Generating PDF...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final storage = const FlutterSecureStorage();
+    final pdf = pw.Document();
+    final client = http.Client();
+
+    try {
+      // Prepare image data
+      final List<Map<String, dynamic>> imagePaths = presentation.images!
+          .map((element) => {
+        'url': element.url,
+        'name': element.name,
+        'concern': element.category,
+      })
+          .toList();
+
+      // Get authentication token
+      String? token = await storage.read(key: 'token');
+
+      // Load images concurrently
+      final List<Map<String, dynamic>> loadedImages = [];
+      final imageFutures = imagePaths.map((imageUrl) async {
+        try {
+          final response = await client.get(
+            Uri.parse(imageUrl['url']),
+            headers: {'Authorization': 'Bearer ${token ?? ''}'},
+          );
+          if (response.statusCode == 200) {
+            // Compress image
+            final compressedImage = await _compressImage(response.bodyBytes);
+            return {
+              'image': pw.MemoryImage(compressedImage),
+              'name': imageUrl['name'],
+              'concern': imageUrl['concern'],
+            };
+          }
+          return null;
+        } catch (e) {
+          debugPrint('Error loading image ${imageUrl['url']}: $e');
+          return null;
+        }
+      }).toList();
+
+      // Wait for all images to load
+      final results = await Future.wait(imageFutures);
+      loadedImages.addAll(results.where((result) => result != null).cast<Map<String, dynamic>>());
+
+      // Generate PDF pages
+      for (int i = 0; i < loadedImages.length; i += 2) {
+        final firstImage = loadedImages[i];
+        final secondImage = (i + 1 < loadedImages.length) ? loadedImages[i + 1] : null;
+
+        pdf.addPage(
+          pw.Page(
+            build: (pw.Context context) => pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Column(
+                  children: [
+                    pw.Text('Name: ${firstImage['name']}', style: pw.TextStyle(fontSize: 12)),
+                    pw.SizedBox(height: 10),
+                    pw.Image(firstImage['image'], fit: pw.BoxFit.contain, height: 300),
+                  ],
+                ),
+                if (secondImage != null) ...[
+                  pw.SizedBox(height: 20),
+                  pw.Column(
+                    children: [
+                      pw.Text('Name: ${secondImage['name']}', style: pw.TextStyle(fontSize: 12)),
+                      pw.SizedBox(height: 10),
+                      pw.Image(secondImage['image'], fit: pw.BoxFit.contain, height: 300),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      }
+
+      // Save PDF
+      final fileName = '${presentation.name}_${DateTime.now().millisecondsSinceEpoch}';
+      final pdfBytes = await pdf.save();
+      final file = await _saveFile(context, fileName, pdfBytes);
+
+      // Close loading dialog and show success
+      if (context.mounted) {
+        Navigator.pop(context);
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Success'),
+            content: Text('PDF downloaded successfully to ${file.path}'),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await OpenFile.open(file.path);
+                },
+                child: Text('Open'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error generating PDF: $e');
+      if (context.mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating PDF: $e')),
+        );
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+// Helper function to compress images
+  Future<Uint8List> _compressImage(Uint8List imageBytes) async {
+    try {
+      final image = img.decodeImage(imageBytes);
+      if (image == null) throw Exception('Failed to decode image');
+
+      // Resize image to a maximum width/height of 800 pixels while maintaining aspect ratio
+      final resizedImage = img.copyResize(image, width: 800, interpolation: img.Interpolation.average);
+
+      // Encode as JPEG with 80% quality
+      return Uint8List.fromList(img.encodeJpg(resizedImage, quality: 80));
+    } catch (e) {
+      debugPrint('Error compressing image: $e');
+      return imageBytes; // Return original if compression fails
+    }
+  }
+
+// Optimized file-saving function
+  Future<File> _saveFile(BuildContext context, String fileName, List<int> bytes) async {
+    Directory? directory;
+    try {
+      if (Platform.isAndroid) {
+        final androidInfo = await DeviceInfoPlugin().androidInfo;
+        final sdkInt = androidInfo.version.sdkInt;
+
+        if (sdkInt >= 30) {
+          if (await _requestPermission(Permission.manageExternalStorage)) {
+            directory = Directory('/storage/emulated/0/Download');
+          } else {
+            directory = await getApplicationDocumentsDirectory();
+          }
+        } else {
+          if (await _requestPermission(Permission.storage)) {
+            directory = Directory('/storage/emulated/0/Download');
+          } else {
+            directory = await getApplicationDocumentsDirectory();
+          }
+        }
+      } else {
+        directory = await getApplicationDocumentsDirectory();
+      }
+
+      // Ensure directory exists
+      if (!await directory!.exists()) {
+        await directory.create(recursive: true);
+      }
+
+      final file = File("${directory.path}${Platform.pathSeparator}$fileName.pdf");
+      if (await file.exists()) {
+        await file.delete();
+      }
+      await file.writeAsBytes(bytes);
+      return file;
+    } catch (e) {
+      debugPrint('Error saving file: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving file: $e')),
+        );
+      }
+      rethrow;
+    }
+  }
+
+// Permission request function (unchanged)
+  Future<bool> _requestPermission(Permission permission) async {
+    try {
+      if (await permission.isGranted) {
+        return true;
+      }
+      final status = await permission.request();
+      return status.isGranted;
+    } catch (e) {
+      debugPrint('Error requesting permission: $e');
+      return false;
+    }
+  }
+  bool _isLoading = false;
+
+  // Future<void> generateAndDownloadPdf(
+  //     BuildContext context, PresentationData presentation) async {
+  //   setState(() {
+  //     _isLoading = true; // Show loading indicator
+  //   });
+
+  //   // Show loading dialog
+  //   showDialog(
+  //     context: context,
+  //     barrierDismissible: false,
+  //     builder: (context) => AlertDialog(
+  //       content: Row(
+  //         children: [
+  //           CircularProgressIndicator(),
+  //           SizedBox(width: 20),
+  //           Text('Generating PDF...'),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+
+  //   // Prepare image data from presentation
+  //   final List<Map<String, dynamic>> imagePaths = presentation.images!
+  //       .map((element) => {
+  //             'url': element.url,
+  //             'name': element.name,
+  //             'concern': element.category,
+  //           })
+  //       .toList();
+
+  //   // Retrieve token for authentication
+  //   final storage = const FlutterSecureStorage();
+  //   String? token = await storage.read(key: 'token');
+
+  //   // Create PDF document
+  //   final pdf = pw.Document();
+  //   final client = http.Client();
+
+  //   try {
+  //     // Load images from URLs
+  //     final List<Map<String, dynamic>> loadedImages = [];
+  //     for (var imageUrl in imagePaths) {
+  //       try {
+  //         final response = await client.get(
+  //           Uri.parse(imageUrl['url']),
+  //           headers: {'Authorization': 'Bearer ${token ?? ''}'},
+  //         );
+  //         if (response.statusCode == 200) {
+  //           loadedImages.add({
+  //             'image': pw.MemoryImage(response.bodyBytes),
+  //             'name': imageUrl['name'],
+  //             'concern': imageUrl['concern'],
+  //           });
+  //         } else {
+  //           print(
+  //               'Failed to load image from ${imageUrl['url']}: ${response.statusCode}');
+  //         }
+  //       } catch (e) {
+  //         print('Error loading ${imageUrl['url']}: $e');
+  //       }
+  //     }
+
+  //     // Add images to PDF, two per page
+  //     for (int i = 0; i < loadedImages.length; i += 2) {
+  //       final firstImage = loadedImages[i];
+  //       final secondImage =
+  //           (i + 1 < loadedImages.length) ? loadedImages[i + 1] : null;
+
+  //       pdf.addPage(
+  //         pw.Page(
+  //           build: (pw.Context context) => pw.Column(
+  //             crossAxisAlignment: pw.CrossAxisAlignment.start,
+  //             mainAxisAlignment: pw.MainAxisAlignment.start,
+  //             children: [
+  //               pw.Column(
+  //                 children: [
+  //                   // pw.Header(
+  //                   //     level: 0,
+  //                   //     child: ),
+  //                   pw.Text('Name: ${firstImage['name']}'),
+  //                   pw.SizedBox(height: 20),
+  //                   pw.Image(firstImage['image'],
+  //                       fit: pw.BoxFit.contain, height: 400),
+  //                 ],
+  //               ),
+  //               // pw.SizedBox(height: 20),
+  //               pw.SizedBox(height: 40),
+  //               if (secondImage != null)
+  //                 pw.Column(
+  //                   children: [
+  //                     pw.Text('Name: ${secondImage['name']}'),
+  //                     pw.SizedBox(height: 20),
+  //                     pw.Image(secondImage['image'],
+  //                         fit: pw.BoxFit.contain, height: 400),
+  //                   ],
+  //                 ),
+  //             ],
+  //           ),
+  //         ),
+  //       );
+  //     }
+
+  //     // Save the PDF to the downloads directory
+  //     // final directory = await getExternalStorageDirectory();
+
+  //     Directory? directory;
+  //     // File? file;
+  //     if (defaultTargetPlatform == TargetPlatform.android) {
+  //       //downloads folder - android only - API>30
+  //       directory = Directory('/storage/emulated/0/Download');
+  //     } else {
+  //       directory = await getApplicationDocumentsDirectory();
+  //     }
+
+  //     bool hasExisted = await directory.exists();
+  //     if (!hasExisted) {
+  //       directory.create();
+  //     }
+  //     final file = File(
+  //         "${directory!.path}/${presentation.name}${DateTime.now().millisecondsSinceEpoch}.pdf");
+  //     print("Saving PDF to: ${file.path}");
+  //     await file.writeAsBytes(await pdf.save());
+
+  //     // Close loading dialog
+  //     Navigator.pop(context);
+
+  //     // Show success message
+  //     showDialog(
+  //       context: context,
+  //       builder: (context) => AlertDialog(
+  //         title: Text('Success'),
+  //         content: Text('PDF downloaded successfully to ${file.path}'),
+  //         actions: [
+  //           TextButton(
+  //             onPressed: () {
+  //               Navigator.pop(context);
+  //               OpenFile.open(file.path); // Open the PDF
+  //             },
+  //             child: Text('Open'),
+  //           ),
+  //           TextButton(
+  //             onPressed: () => Navigator.pop(context),
+  //             child: Text('OK'),
+  //           ),
+  //         ],
+  //       ),
+  //     );
+  //   } catch (e) {
+  //     // Close loading dialog on error
+  //     Navigator.pop(context);
+  //     print('Error generating PDF: $e');
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       SnackBar(content: Text('Error generating PDF: $e')),
+  //     );
+  //   } finally {
+  //     client.close();
+  //     setState(() {
+  //       _isLoading = false; // Hide loading indicator
+  //     });
+  //   }
+  // }
+}
+
+class PresentationScreen extends StatefulWidget {
+  final PresentationData presentation;
+
+  const PresentationScreen({Key? key, required this.presentation})
+      : super(key: key);
+
+  @override
+  State<PresentationScreen> createState() => _PresentationScreenState();
+}
+
+class _PresentationScreenState extends State<PresentationScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _offsetAnimation;
+  bool _isVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _offsetAnimation = Tween<Offset>(
+      begin: Offset(0, 2), // Hidden below screen
+      end: Offset(0, 0), // Visible position
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggleButton() {
+    setState(() {
+      _isVisible = !_isVisible;
+      if (_isVisible) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: widget.presentation.images != null &&
+              widget.presentation.images!.isNotEmpty
+          ? GestureDetector(
+              onTap: _toggleButton,
+              child: Stack(
+                children: [
+                  Consumer<presentationProvider>(
+                    builder: (context, val, child) {
+                      return SizedBox(
+                        child: PhotoViewGallery.builder(
+                          itemCount: widget.presentation.images!.length,
+                          builder: (context, index) {
+                            final imageUrl = widget
+                                .presentation.images![val.currentIndex].url!;
+                            return PhotoViewGalleryPageOptions.customChild(
+                              child: CachedNetworkImage(
+                                imageUrl: imageUrl,
+                                placeholder: (context, url) =>
+                                    Shimmer.fromColors(
+                                  baseColor: Colors.grey[300]!,
+                                  highlightColor: Colors.grey[100]!,
+                                  child: Container(
+                                    color: Colors.white,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) =>
+                                    const Center(child: Icon(Icons.error)),
+                                fit: BoxFit.contain,
+                              ),
+                              heroAttributes:
+                                  PhotoViewHeroAttributes(tag: imageUrl),
+                            );
+                          },
+                          backgroundDecoration:
+                              const BoxDecoration(color: Colors.white),
+                          onPageChanged: (index) {
+                            val.updateValue(
+                                index); // Update index when page changes
+                          },
+                          pageController:
+                              PageController(initialPage: val.currentIndex),
+                        ),
+                      );
+                    },
+                  ),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: EdgeInsets.only(bottom: 20),
+                      child: SlideTransition(
+                        position: _offsetAnimation,
+                        child: Consumer<presentationProvider>(
+                            builder: (context, val, child) {
+                          return SizedBox(
+                            height: 90,
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: widget.presentation.images!.length,
+                              scrollDirection: Axis.horizontal,
+                              itemBuilder: (context, index) {
+                                final isSelected = val.currentIndex == index;
+                                return InkWell(
+                                  onTap: () {
+                                    val.updateValue(
+                                        index); // Update index on tap
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Container(
+                                      height: 80,
+                                      width: 80,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? Colors.blue
+                                              : Colors.grey,
+                                          width: isSelected ? 3 : 2,
+                                        ),
+                                      ),
+                                      child: CachedNetworkImage(
+                                        imageUrl: widget
+                                            .presentation.images![index].url!,
+                                        placeholder: (context, url) =>
+                                            Shimmer.fromColors(
+                                          baseColor: Colors.grey[300]!,
+                                          highlightColor: Colors.grey[100]!,
+                                          child: Container(
+                                            color: Colors.white,
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                          ),
+                                        ),
+                                        errorWidget: (context, url, error) =>
+                                            const Center(
+                                                child: Icon(Icons.error)),
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : const Center(child: Text('No images available')),
+    );
+  }
+}
+
+class presentationProvider extends ChangeNotifier {
+  int _currentIndex = 0;
+  int get currentIndex => _currentIndex;
+
+  void updateValue(int value) {
+    _currentIndex = value;
+    notifyListeners();
+  }
+
+  bool _isLoading = false;
+  bool get isLoading => _isLoading;
+  void updateLoading(bool value) {
+    _isLoading = value;
+    notifyListeners();
+  }
+}
