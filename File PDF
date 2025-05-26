@@ -1,9 +1,20 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+
+import 'package:pharma_clients_app/resources/app_colors.dart';
+import 'package:pharma_clients_app/resources/constant_strings.dart';
+import 'package:pharma_clients_app/utils/responsive/responsive_images.dart';
+import 'package:pharma_clients_app/utils/responsive/responsive_text.dart';
+import 'package:pharma_clients_app/utils/utils.dart';
+import 'package:pharma_clients_app/views/presentation/addPresentationScreen.dart';
+
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:provider/provider.dart';
@@ -13,18 +24,12 @@ import 'package:solar_icons/solar_icons.dart';
 import '../../data/model/response_model/visual_aids_response_model.dart';
 import '../../data/response/status.dart';
 import '../../utils/button.dart';
-import '../../utils/responsive/responsive_images.dart';
 import '../../utils/responsive/responsive_sizes.dart';
-import '../../utils/responsive/responsive_text.dart';
 import '../../utils/screenWidgets /empty_widget.dart';
 import '../../utils/screenWidgets /error_dialogue.dart';
 import '../../utils/screenWidgets /loading_widget.dart';
-
 import '../../view_models/afterLogin/visuals_viewmodel.dart';
 import '../../view_models/beforeLogin/visuals_viewmodel.dart';
-import '../../resources/app_colors.dart';
-import '../../resources/constant_strings.dart';
-import '../../views/presentation/addPresentationScreen.dart';
 
 // ignore: must_be_immutable
 class VisualAidsScreen extends StatefulWidget {
@@ -41,6 +46,7 @@ class _VisualAidsScreenState extends State<VisualAidsScreen> {
 
   @override
   void initState() {
+    // TODO: implement initState
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       getData();
@@ -49,405 +55,1242 @@ class _VisualAidsScreenState extends State<VisualAidsScreen> {
 
   Future<void> getData({bool isRefresh = false}) async {
     final visuals = Provider.of<VisualAidsViewModel>(context, listen: false);
-    final guestVisuals = Provider.of<GuestVisualAidsViewModel>(context, listen: false);
+    final guestVisuals =
+        Provider.of<GuestVisualAidsViewModel>(context, listen: false);
 
-    if (widget.token != null && widget.token!.isNotEmpty) {
+    if (widget.token != null && widget.token.toString().isNotEmpty) {
+      // Only fetch data if it's a refresh request or data has not been fetched yet
       if (isRefresh || visuals.visualAids.isEmpty) {
-        await visuals.fetchVisualAids();
+        visuals.fetchVisualAids();
       }
     } else {
       if (isRefresh || guestVisuals.visualAids.isEmpty) {
-        await guestVisuals.fetchVisualAids();
+        guestVisuals.fetchVisualAids();
       }
     }
+  }
+
+
+  bool _isImagesPrecached = false;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final visuals = Provider.of<VisualAidsViewModel>(context, listen: false);
+      final guestVisuals =
+          Provider.of<GuestVisualAidsViewModel>(context, listen: false);
+
+      if (widget.token != null && widget.token.toString().isNotEmpty) {
+        // Only fetch data if it's a refresh request or data has not been fetched yet
+        if (visuals.visualAids.isEmpty) {
+          visuals.fetchVisualAids();
+        }
+      } else {
+        if (guestVisuals.visualAids.isEmpty) {
+          guestVisuals.fetchVisualAids();
+        }
+      }
+
+      if (!_isImagesPrecached) {
+        // Precache all images in the list
+        for (String url in visuals.visualAids.map((e) => e.url!)) {
+          precacheImage(
+            NetworkImage(url),
+            context,
+            onError: (exception, stackTrace) {
+              print('Error loading image $url: $exception');
+            },
+          );
+        }
+        // Mark as precached after starting the process
+        setState(() {
+          _isImagesPrecached = true;
+        });
+      }
+    });
+
+    // if (!_isImagesPrecached) {
+    //   Future.wait(
+    //     visuals.visualAids
+    //         .map((url) => precacheImage(NetworkImage(url.url!), context))
+    //         .toList(),
+    //   ).then((_) {
+    //     setState(() {
+    //       _isImagesPrecached = true;
+    //     });
+    //   }).catchError((error) {
+    //     print('Error precaching images: $error');
+    //   });
+    // }
   }
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width <= 500;
+    // final myValue = context.watch<VisualAidsViewModel>();
     final myValue = Provider.of<VisualAidsViewModel>(context, listen: false);
-    final guestVis = Provider.of<GuestVisualAidsViewModel>(context, listen: false);
-
+    final guestvis =
+        Provider.of<GuestVisualAidsViewModel>(context, listen: false);
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: true,
-        title: Consumer2<GuestVisualAidsViewModel, VisualAidsViewModel>(
-          builder: (context, v1, v2, _) {
-            return ResponsiveText.getAppBarText(
-              context,
-              "${ConstantStrings.visualAidsscreenHeading} ${(v1.selectedVisualAids.isNotEmpty || v2.selectedVisualAids.isNotEmpty) ? '(${widget.token == null ? "${v1.selectedVisualAids.length}" : v2.selectedVisualAids.length})' : ''}",
-            );
-          },
-        ),
-        actions: [
-          IconButton(
-            onPressed: () async {
-              if (guestVis.selectedVisualAids.isNotEmpty || myValue.selectedVisualAids.isNotEmpty) {
-                await myValue.shareImageToWhatsApp(
-                  context,
-                  widget.token == null ? guestVis.selectedVisualAids : myValue.selectedVisualAids,
-                );
-                guestVis.clearSelection();
-                myValue.clearSelection();
-                setState(() {});
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Please Add Visual Aids")),
-                );
-              }
-            },
-            icon: const Icon(Icons.share),
-          ),
-          if (widget.token != null && widget.token!.isNotEmpty)
+        appBar: AppBar(
+          automaticallyImplyLeading: true,
+          // title: ResponsiveText.getAppBarText(
+          //     context, "${ConstantStrings.visualAidsscreenHeading} ${myValue.selectedVisualAids.length}"),
+          title: Consumer2<GuestVisualAidsViewModel, VisualAidsViewModel>(
+              builder: (context, v1, v2, _) {
+            return ResponsiveText.getAppBarText(context,
+                "${ConstantStrings.visualAidsscreenHeading} ${(v1.selectedVisualAids.isNotEmpty||v1.selectedVisualAids.isNotEmpty)?'(${widget.token == null ? "${v1.selectedVisualAids.length}" : v2.selectedVisualAids.length})':""}");
+          }),
+          actions: [
             IconButton(
-              onPressed: () {
-                Provider.of<VisualAidsViewModel>(context, listen: false).downloadVisuals();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Downloading visual aids...")),
-                );
-              },
-              icon: ResponsiveImages.getAppBarIcon(context, SolarIconsOutline.downloadMinimalistic),
-            ),
-          if (widget.token != null && widget.token!.isNotEmpty)
-            IconButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => AddPresentationScreen()),
-                );
-              },
-              icon: ResponsiveImages.getAppBarIcon(context, SolarIconsOutline.galleryEdit),
-            ),
-          IconButton(
-            onPressed: () {
-              showModalBottomSheet(
-                context: context,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(16.0)),
-                ),
-                backgroundColor: Colors.white,
-                isScrollControlled: true,
-                builder: (BuildContext context) {
-                  return widget.token != null && widget.token!.isNotEmpty
-                      ? ChangeNotifierProvider.value(
-                    value: Provider.of<VisualAidsViewModel>(context, listen: false),
-                    child: _buildFilterBottomSheet(context, myValue),
-                  )
-                      : ChangeNotifierProvider.value(
-                    value: Provider.of<GuestVisualAidsViewModel>(context, listen: false),
-                    child: _buildFilterBottomSheet(context, guestVis),
-                  );
+                onPressed: () async {
+                  if (guestvis.selectedVisualAids.isNotEmpty ||
+                      myValue.selectedVisualAids.isNotEmpty) {
+                    await myValue.shareImageToWhatsApp(
+                        context,
+                        widget.token == null
+                            ? guestvis.selectedVisualAids
+                            : myValue.selectedVisualAids);
+                    guestvis.selectedVisualAids.clear;
+                    myValue.selectedVisualAids.clear;
+                    setState(() {});
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Please Add Visual Aids")),
+                    );
+                  }
+
+                  // myValue.selectedVisualAids
                 },
-              );
-            },
-            icon: const Icon(CupertinoIcons.slider_horizontal_3),
-          ),
-          const SizedBox(width: 2),
-        ],
-      ),
-      body: widget.token != null && widget.token!.isNotEmpty
-          ? RefreshIndicator(
-        onRefresh: () => getData(isRefresh: true),
-        child: Consumer<VisualAidsViewModel>(
-          builder: (context, value, _) {
-            switch (value.visualaidsList.status!) {
-              case Status.loading:
-                return const LoadingScreen();
-              case Status.error:
-                return Container(
-                  color: AppColors.backgroundColor,
-                  child: ErrorDialogue(message: value.visualaidsList.message),
-                );
-              case Status.completed:
-                return _buildVisualAidsGrid(context, value, width, myValue);
-            }
-          },
-        ),
-      )
-          : Consumer<GuestVisualAidsViewModel>(
-        builder: (context, value, _) {
-          switch (value.visualaidsList.status!) {
-            case Status.loading:
-              return const LoadingScreen();
-            case Status.error:
-              return Center(child: Text(value.visualaidsList.message.toString()));
-            case Status.completed:
-              return RefreshIndicator(
-                onRefresh: () => getData(isRefresh: true),
-                child: _buildVisualAidsGrid(context, value, width, guestVis),
-              );
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildFilterBottomSheet(BuildContext context, dynamic value) {
-    return Container(
-      height: MediaQuery.sizeOf(context).height * 0.8,
-      width: MediaQuery.sizeOf(context).width,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.only(left: 20, top: 20),
-            child: ResponsiveText.getProductNameText(context, 'Filters'),
-          ),
-          Divider(color: Colors.black.withOpacity(0.1)),
-          Expanded(
-            child: Row(
-              children: [
-                Container(
-                  width: ResponsiveSizes.leftContainerWidth(context),
-                  decoration: const BoxDecoration(
-                    borderRadius: BorderRadius.only(topLeft: Radius.circular(2)),
-                  ),
-                  child: ListView(
-                    children: value.filterOptions.keys.map((category) {
-                      final bool isSelected = category == value.selectedCategory;
-                      final selectedCount = value.getSelectedCount(category);
-                      return GestureDetector(
-                        onTap: () => value.selectCategory(category),
-                        child: Container(
-                          color: isSelected ? AppColors.primaryColor : Colors.transparent,
-                          child: ListTile(
-                            title: Text(
-                              '$category ${selectedCount == 0 ? '' : '($selectedCount)'}',
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : Colors.black,
-                                fontSize: 15,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                VerticalDivider(color: Colors.black.withOpacity(0.1), width: 1),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8.0, right: 8.0, bottom: 8.0),
-                        child: TextField(
-                          decoration: InputDecoration(
-                            filled: true,
-                            fillColor: AppColors.primaryColor.withOpacity(0.05),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: const BorderRadius.all(Radius.circular(15)),
-                              borderSide: BorderSide(color: AppColors.backgroundColor),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: const BorderRadius.all(Radius.circular(15)),
-                              borderSide: BorderSide(color: AppColors.backgroundColor),
-                            ),
-                            contentPadding: const EdgeInsets.all(10),
-                            prefixIcon: ResponsiveImages.getAppBarIcon(context, SolarIconsOutline.magnifier),
-                            border: InputBorder.none,
-                            hintText: "Search",
-                            hintStyle: const TextStyle(color: Colors.black38),
-                          ),
-                          onChanged: value.updateSearchText,
-                        ),
-                      ),
-                      Expanded(
-                        child: ListView(
-                          padding: const EdgeInsets.only(left: 10),
-                          children: value.getFilteredOptions().map((option) {
-                            final isSelected = value.selectedFilters[value.selectedCategory]?.contains(option) == true;
-                            return Column(
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                FilterChip(
-                                  label: ResponsiveText.getProductFilterTitle(context, option),
-                                  backgroundColor: Colors.white,
-                                  selectedColor: AppColors.primaryColor.withOpacity(0.05),
-                                  selected: isSelected,
-                                  onSelected: (_) => value.toggleFilterOption(value.selectedCategory, option),
-                                ),
-                              ],
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Divider(color: Colors.black.withOpacity(0.1)),
-          Container(
-            padding: const EdgeInsets.only(bottom: 15, right: 20, left: 20, top: 10),
-            color: Colors.white,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                OutlinedButton(
-                  onPressed: value.clearFilters,
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(10)),
-                    ),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.all(15),
-                    child: Text(
-                      'Clear',
-                      style: TextStyle(
-                        color: Colors.black,
-                        fontSize: ResponsiveText.getInputTextSize(context),
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                ),
-                Button(
-                  onPress: () {
-                    value.applyFilters();
-                    Navigator.of(context).pop();
+                icon: Icon(Icons.share)),
+            if (widget.token != null && widget.token!.isNotEmpty)
+              IconButton(
+                  onPressed: () {
+                    Provider.of<VisualAidsViewModel>(context, listen: false)
+                        .downloadVisuals();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Downloading visual aids...")));
                   },
-                  title: 'Apply',
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVisualAidsGrid(BuildContext context, dynamic value, bool width, dynamic viewModel) {
-    return Column(
-      children: [
-        if (value.isDownloading) ...[
-          const Padding(
-            padding: EdgeInsets.all(8.0),
-            child: LinearProgressIndicator(),
-          ),
-          Text('Downloading... ${(value.downloadProgress * 100).toStringAsFixed(0)}%'),
-        ],
-        Container(
-          margin: const EdgeInsets.only(left: 10, right: 10),
-          child: TextFormField(
-            style: TextStyle(fontSize: ResponsiveText.getInputTextSize(context)),
-            controller: controller,
-            onChanged: (text) => viewModel.updateSearchText(text.toLowerCase()),
-            decoration: InputDecoration(
-              prefixIcon: ResponsiveImages.getSearchBarIcon(context, SolarIconsOutline.magnifier),
-              border: InputBorder.none,
-              hintText: "Search",
-              hintStyle: const TextStyle(color: Colors.black38),
-            ),
-          ),
-        ),
-        Expanded(
-          child: value.visualAids.isNotEmpty
-              ? Container(
-            margin: const EdgeInsets.only(left: 10, right: 10, top: 10),
-            child: CustomScrollView(
-              slivers: [
-                SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: width ? 2 : 3,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 1,
+                  icon: ResponsiveImages.getAppBarIcon(
+                      context, SolarIconsOutline.downloadMinimalistic)),
+            if (widget.token != null && widget.token!.isNotEmpty)
+              IconButton(
+                  onPressed: () {
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => AddPresentationScreen()));
+                  },
+                  icon: ResponsiveImages.getAppBarIcon(
+                      context, SolarIconsOutline.galleryEdit)),
+            IconButton(
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(16.0)),
                   ),
-                  delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                      final visual = value.visualAids[index];
-                      final imageUrl = visual.url;
-                      final isSelected = viewModel.isSelected(visual);
-                      final thumbUrl = _getOptimizedImageUrl(
-                        imageUrl!,
-                        width: 200,
-                        height: 200,
-                      );
-
-                      return InkWell(
-                        onLongPress: () => viewModel.toggleSelection(visual),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ImagePage(
-                                images: value.visualAids,
-                                initialIndex: index,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Stack(
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(10),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: AppColors.primaryColor.withOpacity(0.1),
-                                    spreadRadius: 0.5,
-                                    blurRadius: 2,
-                                    offset: const Offset(0, 0),
-                                  ),
-                                ],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
-                                child: CachedNetworkImage(
-                                  imageUrl: thumbUrl,
-                                  cacheKey: imageUrl,
-                                  memCacheWidth: 200,
-                                  memCacheHeight: 200,
-                                  fit: BoxFit.cover,
-                                  placeholder: (context, url) => Shimmer.fromColors(
-                                    baseColor: Colors.grey[300]!,
-                                    highlightColor: Colors.grey[100]!,
-                                    period: const Duration(milliseconds: 800),
-                                    child: Container(color: Colors.white),
-                                  ),
-                                  errorWidget: (context, url, error) => Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.center,
+                  backgroundColor: Colors.white,
+                  isScrollControlled: true,
+                  builder: (BuildContext context) {
+                    return widget.token != null && widget.token!.isNotEmpty
+                        ? ChangeNotifierProvider.value(
+                            value: Provider.of<VisualAidsViewModel>(context,
+                                listen: false),
+                            child: Consumer<VisualAidsViewModel>(
+                              builder: (context, value, _) {
+                                return Container(
+                                  height:
+                                      MediaQuery.sizeOf(context).height * 0.8,
+                                  width: MediaQuery.sizeOf(context).width,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      const Icon(CupertinoIcons.exclamationmark_circle_fill),
-                                      const Text('Corrupt Image'),
-                                      Text(visual.name ?? 'No Name'),
+                                      Container(
+                                          padding: EdgeInsets.only(
+                                            left: 20,
+                                            top: 20,
+                                          ),
+                                          child:
+                                              ResponsiveText.getProductNameText(
+                                                  context, 'Filters')),
+                                      Divider(
+                                        color: Colors.black.withOpacity(0.1),
+                                      ),
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: ResponsiveSizes
+                                                  .leftContainerWidth(context),
+                                              decoration: BoxDecoration(
+                                                borderRadius: BorderRadius.only(
+                                                    topLeft:
+                                                        Radius.circular(2)),
+                                              ),
+                                              child: ListView(
+                                                children: value
+                                                    .filterOptions.keys
+                                                    .map((category) {
+                                                  final bool isSelected =
+                                                      category ==
+                                                          value
+                                                              .selectedCategory;
+                                                  final selectedCount =
+                                                      value.getSelectedCount(
+                                                          category);
+                                                  return GestureDetector(
+                                                    onTap: () {
+                                                      value.selectCategory(
+                                                          category);
+                                                    },
+                                                    child: Container(
+                                                      color: isSelected
+                                                          ? AppColors
+                                                              .primaryColor
+                                                          : Colors.transparent,
+                                                      child: ListTile(
+                                                        title: Text(
+                                                          '${category} ${selectedCount == 0 ? '' : '(${selectedCount})'}',
+                                                          style: TextStyle(
+                                                              color: isSelected
+                                                                  ? Colors.white
+                                                                  : Colors
+                                                                      .black,
+                                                              fontSize: 15),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            ),
+                                            VerticalDivider(
+                                              color:
+                                                  Colors.black.withOpacity(0.1),
+                                              width: 1,
+                                            ),
+                                            Expanded(
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            left: 8.0,
+                                                            right: 8.0,
+                                                            bottom: 8.0),
+                                                    child: TextField(
+                                                      decoration: InputDecoration(
+                                                          filled: true,
+                                                          fillColor: AppColors
+                                                              .primaryColor
+                                                              .withOpacity(
+                                                                  0.05),
+                                                          enabledBorder: OutlineInputBorder(
+                                                              borderRadius:
+                                                                  const BorderRadius.all(
+                                                                      Radius.circular(
+                                                                          15)),
+                                                              borderSide: BorderSide(
+                                                                  color: AppColors
+                                                                      .backgroundColor)),
+                                                          focusedBorder: OutlineInputBorder(
+                                                              borderRadius:
+                                                                  const BorderRadius.all(
+                                                                      Radius.circular(15)),
+                                                              borderSide: BorderSide(color: AppColors.backgroundColor)),
+                                                          contentPadding: EdgeInsets.all(10),
+                                                          prefixIcon: ResponsiveImages.getAppBarIcon(context, SolarIconsOutline.magnifier),
+                                                          border: InputBorder.none,
+                                                          hintText: "Search",
+                                                          hintStyle: const TextStyle(color: Colors.black38)),
+                                                      onChanged: value
+                                                          .updateSearchText,
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    child: ListView(
+                                                      padding: EdgeInsets.only(
+                                                          left: 10),
+                                                      children: value
+                                                          .getFilteredOptions()
+                                                          .map((option) {
+                                                        final isSelected = value
+                                                                .selectedFilters[
+                                                                    value
+                                                                        .selectedCategory]
+                                                                ?.contains(
+                                                                    option) ==
+                                                            true;
+                                                        return Column(
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .start,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            FilterChip(
+                                                              label: ResponsiveText
+                                                                  .getProductFilterTitle(
+                                                                      context,
+                                                                      option),
+                                                              backgroundColor:
+                                                                  Colors.white,
+                                                              selectedColor: AppColors
+                                                                  .primaryColor
+                                                                  .withOpacity(
+                                                                      0.05),
+                                                              selected:
+                                                                  isSelected,
+                                                              onSelected: (_) =>
+                                                                  value.toggleFilterOption(
+                                                                      value
+                                                                          .selectedCategory,
+                                                                      option),
+                                                            ),
+                                                          ],
+                                                        );
+                                                      }).toList(),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Divider(
+                                        color: Colors.black.withOpacity(0.1),
+                                      ),
+                                      Container(
+                                        padding: EdgeInsets.only(
+                                            bottom: 15,
+                                            right: 20,
+                                            left: 20,
+                                            top: 10),
+                                        color: Colors.white,
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            OutlinedButton(
+                                                onPressed: value.clearFilters,
+                                                style: OutlinedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.white,
+                                                    shape: RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius.all(
+                                                                Radius.circular(
+                                                                    10)))),
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.all(15),
+                                                  child: Text('Clear',
+                                                      style: TextStyle(
+                                                          color: Colors.black,
+                                                          fontSize: ResponsiveText
+                                                              .getInputTextSize(
+                                                                  context),
+                                                          fontWeight:
+                                                              FontWeight.w400)),
+                                                )),
+                                            Button(
+                                              onPress: () {
+                                                Provider.of<VisualAidsViewModel>(
+                                                        context,
+                                                        listen: false)
+                                                    .applyFilters();
+                                                print(
+                                                    'Selected Filters: ${value.selectedFilters}');
+                                                Navigator.of(context).pop();
+                                              },
+                                              title: 'Apply',
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ],
                                   ),
+                                );
+                              },
+                            ),
+                          )
+                        : ChangeNotifierProvider.value(
+                            value: Provider.of<GuestVisualAidsViewModel>(
+                                context,
+                                listen: false),
+                            child: Consumer<GuestVisualAidsViewModel>(
+                              builder: (context, value, _) {
+                                return Container(
+                                  height:
+                                      MediaQuery.sizeOf(context).height * 0.8,
+                                  width: MediaQuery.sizeOf(context).width,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                          padding: EdgeInsets.only(
+                                            left: 20,
+                                            top: 20,
+                                          ),
+                                          child:
+                                              ResponsiveText.getProductNameText(
+                                                  context, 'Filters')),
+                                      Divider(
+                                        color: Colors.black.withOpacity(0.1),
+                                      ),
+                                      Expanded(
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: ResponsiveSizes
+                                                  .leftContainerWidth(context),
+                                              decoration: BoxDecoration(
+                                                borderRadius: BorderRadius.only(
+                                                    topLeft:
+                                                        Radius.circular(2)),
+                                              ),
+                                              child: ListView(
+                                                children: value
+                                                    .filterOptions.keys
+                                                    .map((category) {
+                                                  final bool isSelected =
+                                                      category ==
+                                                          value
+                                                              .selectedCategory;
+                                                  final selectedCount =
+                                                      value.getSelectedCount(
+                                                          category);
+                                                  return GestureDetector(
+                                                    onTap: () {
+                                                      value.selectCategory(
+                                                          category);
+                                                    },
+                                                    child: Container(
+                                                      color: isSelected
+                                                          ? AppColors
+                                                              .primaryColor
+                                                          : Colors.transparent,
+                                                      child: ListTile(
+                                                        title: Text(
+                                                          '${category} ${selectedCount == 0 ? '' : '(${selectedCount})'}',
+                                                          style: TextStyle(
+                                                              color: isSelected
+                                                                  ? Colors.white
+                                                                  : Colors
+                                                                      .black,
+                                                              fontSize: 15),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            ),
+                                            VerticalDivider(
+                                              color:
+                                                  Colors.black.withOpacity(0.1),
+                                              width: 1,
+                                            ),
+                                            Expanded(
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                            left: 8.0,
+                                                            right: 8.0,
+                                                            bottom: 8.0),
+                                                    child: TextField(
+                                                      decoration: InputDecoration(
+                                                          filled: true,
+                                                          fillColor: AppColors
+                                                              .primaryColor
+                                                              .withOpacity(
+                                                                  0.05),
+                                                          enabledBorder: OutlineInputBorder(
+                                                              borderRadius:
+                                                                  const BorderRadius.all(
+                                                                      Radius.circular(
+                                                                          15)),
+                                                              borderSide: BorderSide(
+                                                                  color: AppColors
+                                                                      .backgroundColor)),
+                                                          focusedBorder: OutlineInputBorder(
+                                                              borderRadius:
+                                                                  const BorderRadius.all(
+                                                                      Radius.circular(15)),
+                                                              borderSide: BorderSide(color: AppColors.backgroundColor)),
+                                                          contentPadding: EdgeInsets.all(10),
+                                                          prefixIcon: ResponsiveImages.getAppBarIcon(context, SolarIconsOutline.magnifier),
+                                                          border: InputBorder.none,
+                                                          hintText: "Search",
+                                                          hintStyle: const TextStyle(color: Colors.black38)),
+                                                      onChanged: value
+                                                          .updateSearchText,
+                                                    ),
+                                                  ),
+                                                  Expanded(
+                                                    child: ListView(
+                                                      padding: EdgeInsets.only(
+                                                          left: 10),
+                                                      children: value
+                                                          .getFilteredOptions()
+                                                          .map((option) {
+                                                        final isSelected = value
+                                                                .selectedFilters[
+                                                                    value
+                                                                        .selectedCategory]
+                                                                ?.contains(
+                                                                    option) ==
+                                                            true;
+                                                        return Column(
+                                                          mainAxisAlignment:
+                                                              MainAxisAlignment
+                                                                  .start,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            FilterChip(
+                                                              label: ResponsiveText
+                                                                  .getProductFilterTitle(
+                                                                      context,
+                                                                      option),
+                                                              backgroundColor:
+                                                                  Colors.white,
+                                                              selectedColor: AppColors
+                                                                  .primaryColor
+                                                                  .withOpacity(
+                                                                      0.05),
+                                                              selected:
+                                                                  isSelected,
+                                                              onSelected: (_) =>
+                                                                  value.toggleFilterOption(
+                                                                      value
+                                                                          .selectedCategory,
+                                                                      option),
+                                                            ),
+                                                          ],
+                                                        );
+                                                      }).toList(),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Divider(
+                                        color: Colors.black.withOpacity(0.1),
+                                      ),
+                                      Container(
+                                        padding: EdgeInsets.only(
+                                            bottom: 15,
+                                            right: 20,
+                                            left: 20,
+                                            top: 10),
+                                        color: Colors.white,
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            OutlinedButton(
+                                                onPressed: value.clearFilters,
+                                                style: OutlinedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.white,
+                                                    shape: RoundedRectangleBorder(
+                                                        borderRadius:
+                                                            BorderRadius.all(
+                                                                Radius.circular(
+                                                                    10)))),
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.all(15),
+                                                  child: Text('Clear',
+                                                      style: TextStyle(
+                                                          color: Colors.black,
+                                                          fontSize: ResponsiveText
+                                                              .getInputTextSize(
+                                                                  context),
+                                                          fontWeight:
+                                                              FontWeight.w400)),
+                                                )),
+                                            Button(
+                                              onPress: () {
+                                                Provider.of<VisualAidsViewModel>(
+                                                        context,
+                                                        listen: false)
+                                                    .applyFilters();
+                                                print(
+                                                    'Selected Filters: ${value.selectedFilters}');
+                                                Navigator.of(context).pop();
+                                              },
+                                              title: 'Apply',
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                  },
+                );
+              },
+              icon: Icon(CupertinoIcons.slider_horizontal_3),
+            ),
+            SizedBox(
+              width: 2,
+            )
+          ],
+        ),
+        body: widget.token != null && widget.token!.isNotEmpty
+            ? RefreshIndicator(
+                onRefresh: () => getData(isRefresh: true),
+                child: Consumer<VisualAidsViewModel>(
+                  builder: (context, value, _) {
+                    switch (value.visualaidsList.status!) {
+                      case Status.loading:
+                        return const LoadingScreen();
+                      case Status.error:
+                        return Container(
+                            color: AppColors.backgroundColor,
+                            child: ErrorDialogue(
+                                message: value.visualaidsList.message));
+                      case Status.completed:
+                        return Column(
+                          children: [
+                            if (value.isDownloading) ...[
+                              Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: LinearProgressIndicator(
+                                    value: value.downloadProgress),
+                              ),
+                              Text(
+                                  'Downloading... ${(value.downloadProgress * 100).toStringAsFixed(0)}%'),
+                            ],
+                            Container(
+                              margin: EdgeInsets.only(left: 10, right: 10),
+                              child: TextFormField(
+                                style: TextStyle(
+                                    fontSize: ResponsiveText.getInputTextSize(
+                                        context)),
+                                controller: controller,
+                                onChanged: (value) {
+                                  Provider.of<VisualAidsViewModel>(context,
+                                          listen: false)
+                                      .updateSearchText(value.toLowerCase());
+                                },
+                                decoration: InputDecoration(
+                                  prefixIcon: ResponsiveImages.getSearchBarIcon(
+                                      context, SolarIconsOutline.magnifier),
+                                  border: InputBorder.none,
+                                  hintText: "Search",
+                                  hintStyle:
+                                      const TextStyle(color: Colors.black38),
                                 ),
                               ),
                             ),
-                            if (isSelected)
-                              Positioned(
-                                top: 5,
-                                right: 5,
-                                child: Icon(
-                                  CupertinoIcons.check_mark_circled_solid,
-                                  color: AppColors.primaryColor,
+                            Expanded(
+                              child: value.visualAids.isNotEmpty
+                                  ? Container(
+                                      margin: EdgeInsets.only(
+                                          left: 10, right: 10, top: 10),
+                                      child: CustomScrollView(
+                                        slivers: [
+                                          SliverGrid(
+                                            gridDelegate:
+                                                SliverGridDelegateWithFixedCrossAxisCount(
+                                              crossAxisCount: width ? 2 : 3,
+                                              mainAxisSpacing: 10,
+                                              crossAxisSpacing: 10,
+                                              childAspectRatio: 1,
+                                            ),
+                                            delegate:
+                                                SliverChildBuilderDelegate(
+                                              (context, index) {
+                                                final imageUrl =
+                                                    value.visualAids[index].url;
+                                                final isSelected =
+                                                    myValue.isSelected(value
+                                                        .visualAids[index]);
+                                                // Generate thumbnail URL
+                                                final thumbUrl =
+                                                    _getOptimizedImageUrl(
+                                                  imageUrl!,
+                                                  width: 10,
+                                                  height: 10,
+                                                );
+
+                                                print(thumbUrl);
+                                                return InkWell(
+                                                  onLongPress: () {
+                                                    myValue.toggleSelection(
+                                                        value
+                                                            .visualAids[index]);
+                                                  },
+                                                  onTap: () {
+                                                    // myValue.toggleSelection(
+                                                    //     value
+                                                    //         .visualAids[index]);
+                                                    Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                        builder: (context) =>
+                                                            ImagePage(
+                                                          images:
+                                                              value.visualAids,
+                                                          initialIndex: index,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                  child: Stack(
+                                                    children: [
+                                                      Container(
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: Colors.white,
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(10),
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color: AppColors
+                                                                  .primaryColor
+                                                                  .withOpacity(
+                                                                      0.1),
+                                                              spreadRadius: 0.5,
+                                                              blurRadius: 2,
+                                                              offset:
+                                                                  const Offset(
+                                                                      0, 0),
+                                                            )
+                                                          ],
+                                                        ),
+                                                        child: ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(10),
+                                                          child:
+                                                              CachedNetworkImage(
+                                                            imageUrl: thumbUrl,
+                                                            cacheKey: imageUrl,
+                                                            memCacheWidth: 200,
+                                                            memCacheHeight: 200,
+                                                            fadeInDuration:
+                                                                const Duration(
+                                                                    milliseconds:
+                                                                        0),
+                                                            placeholderFadeInDuration:
+                                                                const Duration(
+                                                                    milliseconds:
+                                                                        1),
+                                                            imageBuilder: (context,
+                                                                    imageProvider) =>
+                                                                Container(
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                image:
+                                                                    DecorationImage(
+                                                                  image:
+                                                                      imageProvider,
+                                                                  fit: BoxFit
+                                                                      .contain,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            // placeholder: (context, url) => Shimmer.fromColors(
+                                                            //   baseColor: Colors.grey[300]!,
+                                                            //   highlightColor: Colors.grey[100]!,
+                                                            //   period: const Duration(milliseconds: 800),
+                                                            //   child: Container(
+                                                            //     color: Colors.white,
+                                                            //   ),
+                                                            // ),
+                                                            errorWidget:
+                                                                (context, url,
+                                                                        error) =>
+                                                                    Column(
+                                                              mainAxisAlignment:
+                                                                  MainAxisAlignment
+                                                                      .center,
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .center,
+                                                              children: [
+                                                                const Icon(
+                                                                    CupertinoIcons
+                                                                        .exclamationmark_circle_fill),
+                                                                const Text(
+                                                                    'Corrupt Image'),
+                                                                Text(value
+                                                                    .visualAids[
+                                                                        index]
+                                                                    .name!)
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      if (isSelected)
+                                                        Container(
+                                                          margin:
+                                                              EdgeInsets.only(
+                                                            right: 3,
+                                                          ),
+                                                          child: Icon(
+                                                            CupertinoIcons
+                                                                .check_mark_circled_solid,
+                                                            color: AppColors
+                                                                .primaryColor,
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                              childCount:
+                                                  value.visualAids.length,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : const EmptyWidget(),
+                            ),
+                          ],
+                        );
+
+                      // return Column(
+                      //   children: [
+                      //     if (value.isDownloading) ...[
+                      //       Padding(
+                      //         padding: const EdgeInsets.all(8.0),
+                      //         child: LinearProgressIndicator(value: value.downloadProgress),
+                      //       ),
+                      //       Text('Downloading... ${(value.downloadProgress * 100).toStringAsFixed(0)}%'),
+                      //     ],
+                      //     Container(
+                      //       margin: EdgeInsets.only(left: 10, right: 10),
+                      //       child: TextFormField(
+                      //         style: TextStyle(fontSize: ResponsiveText.getInputTextSize(context)),
+                      //         controller: controller,
+                      //         onChanged: (value) {
+                      //           Provider.of<VisualAidsViewModel>(context, listen: false).updateSearchText(value.toLowerCase());
+                      //         },
+                      //         decoration: InputDecoration(
+                      //           prefixIcon: ResponsiveImages.getSearchBarIcon(context, SolarIconsOutline.magnifier),
+                      //           border: InputBorder.none,
+                      //           hintText: "Search",
+                      //           hintStyle: const TextStyle(color: Colors.black38),
+                      //         ),
+                      //       ),
+                      //     ),
+                      //     Expanded(
+                      //       child: value.visualAids.isNotEmpty
+                      //           ? Container(
+                      //         margin: EdgeInsets.only(left: 10, right: 10, top: 10),
+                      //         child: GridView.builder(
+                      //           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      //             crossAxisCount: width ? 2 : 3,
+                      //           ),
+                      //           itemCount: value.visualAids.length,
+                      //           itemBuilder: (context, index) {
+                      //             return InkWell(
+                      //               onTap: () {
+                      //                 Navigator.push(
+                      //                   context,
+                      //                   MaterialPageRoute(
+                      //                     builder: (context) => ImagePage(
+                      //                       images: value.visualAids,
+                      //                       initialIndex: index,
+                      //                     ),
+                      //                   ),
+                      //                 );
+                      //               },
+                      //               child: Container(
+                      //                 margin: EdgeInsets.all(5),
+                      //                 decoration: BoxDecoration(
+                      //                   color: Colors.white,
+                      //                   borderRadius:
+                      //                   const BorderRadius.all(
+                      //                       Radius.circular(10)),
+                      //                   boxShadow: [
+                      //                     BoxShadow(
+                      //                       color: AppColors.primaryColor.withOpacity(0.1),
+                      //                       spreadRadius: 0.5,
+                      //                       blurRadius: 2,
+                      //                       offset: const Offset(0, 0),
+                      //                     )
+                      //                   ],
+                      //                 ),
+                      //                 child: CachedNetworkImage(
+                      //                   imageUrl: '${value.visualAids[index].url}',
+                      //                   imageBuilder: (context, imageProvider) => Container(
+                      //                         decoration: BoxDecoration(
+                      //                           image: DecorationImage(
+                      //                             image: imageProvider,
+                      //                             fit: BoxFit.contain,
+                      //                           ),
+                      //                         ),
+                      //                       ),
+                      //                   placeholderFadeInDuration: Duration(milliseconds: 5),
+                      //                   placeholder: (context, url) =>
+                      //                       Shimmer.fromColors(
+                      //                         baseColor: Colors.grey[300]!,
+                      //                         highlightColor: Colors.grey[100]!,
+                      //                         child: Container(
+                      //                           color: Colors.white,
+                      //                           width: double.infinity,
+                      //                           height: double.infinity,
+                      //                         ),
+                      //                       ),
+                      //                   errorWidget: (context, url, error) => Column(
+                      //                     mainAxisAlignment: MainAxisAlignment.center,
+                      //                     crossAxisAlignment: CrossAxisAlignment.center,
+                      //                     children: [
+                      //                       const Icon(CupertinoIcons.exclamationmark_circle_fill),
+                      //                       Text('Corrupt Image'),
+                      //                       Text(value.visualAids[index].name!)
+                      //                     ],
+                      //                   ),
+                      //                 ),
+                      //               ),
+                      //             );
+                      //           },
+                      //         ),
+                      //       )
+                      //           : const EmptyWidget(),
+                      //     ),
+                      //   ],
+                      // );
+                    }
+                  },
+                ),
+              )
+            : Consumer<GuestVisualAidsViewModel>(
+                builder: (context, value, _) {
+                  switch (value.visualaidsList.status!) {
+                    case Status.loading:
+                      return const LoadingScreen();
+                    case Status.error:
+                      if (kDebugMode) {
+                        print('run error');
+                      }
+                      return Center(
+                        child: Text(value.visualaidsList.message.toString()),
+                      );
+                    case Status.completed:
+                      return RefreshIndicator(
+                        onRefresh: () => getData(isRefresh: true),
+                        child: Column(
+                          children: [
+                            Container(
+                              margin: EdgeInsets.only(left: 10, right: 10),
+                              child: TextFormField(
+                                style: TextStyle(
+                                    fontSize: ResponsiveText.getInputTextSize(
+                                        context)),
+                                controller: controller,
+                                onChanged: (value) {
+                                  Provider.of<GuestVisualAidsViewModel>(context,
+                                          listen: false)
+                                      .updateSearchText(value.toLowerCase());
+                                },
+                                decoration: InputDecoration(
+                                  prefixIcon: ResponsiveImages.getSearchBarIcon(
+                                      context, SolarIconsOutline.magnifier),
+                                  border: InputBorder.none,
+                                  hintText: "Search",
+                                  hintStyle:
+                                      const TextStyle(color: Colors.black38),
                                 ),
                               ),
+                            ),
+                            Expanded(
+                              child: value.visualAids.isNotEmpty
+                                  ? Container(
+                                      margin: EdgeInsets.only(
+                                          left: 10, right: 10, top: 10),
+                                      child: CustomScrollView(
+                                        slivers: [
+                                          SliverGrid(
+                                            gridDelegate:
+                                                SliverGridDelegateWithFixedCrossAxisCount(
+                                              crossAxisCount: width ? 2 : 3,
+                                              mainAxisSpacing: 10,
+                                              crossAxisSpacing: 10,
+                                              childAspectRatio: 1,
+                                            ),
+                                            delegate:
+                                                SliverChildBuilderDelegate(
+                                              (context, index) {
+                                                final imageUrl =
+                                                    value.visualAids[index].url;
+
+                                                final isSelected =
+                                                    guestvis.isSelected(value
+                                                        .visualAids[index]);
+                                                final thumbUrl =
+                                                    _getOptimizedImageUrl(
+                                                  imageUrl!,
+                                                  width: 2,
+                                                  height: 1,
+                                                );
+// compressed image
+
+                                                return InkWell(
+                                                  onLongPress: () {
+                                                    guestvis.toggleSelection(
+                                                        value.visualAids[index]);
+                                                  },
+                                                  onTap: () {
+                                                    Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                        builder: (context) =>
+                                                            ImagePage(
+                                                          images:
+                                                              value.visualAids,
+                                                          initialIndex: index,
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                  child: Stack(
+                                                    children: [
+                                                      Container(
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: Colors.white,
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(10),
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color: AppColors
+                                                                  .primaryColor
+                                                                  .withOpacity(
+                                                                      0.1),
+                                                              spreadRadius: 0.5,
+                                                              blurRadius: 2,
+                                                              offset:
+                                                                  const Offset(
+                                                                      0, 0),
+                                                            )
+                                                          ],
+                                                        ),
+                                                        child: ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(10),
+                                                          child:
+                                                              CachedNetworkImage(
+                                                            imageUrl: thumbUrl,
+                                                            cacheKey: imageUrl,
+                                                            memCacheWidth: 200,
+                                                            memCacheHeight: 200,
+                                                            fadeInDuration:
+                                                                const Duration(
+                                                                    milliseconds:
+                                                                        0),
+                                                            placeholderFadeInDuration:
+                                                                const Duration(
+                                                                    milliseconds:
+                                                                        1),
+                                                            imageBuilder: (context,
+                                                                    imageProvider) =>
+                                                                Container(
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                image:
+                                                                    DecorationImage(
+                                                                  image:
+                                                                      imageProvider,
+                                                                  fit: BoxFit
+                                                                      .contain,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            placeholder: (context,
+                                                                    url) =>
+                                                                Shimmer
+                                                                    .fromColors(
+                                                              baseColor: Colors
+                                                                  .grey[300]!,
+                                                              highlightColor:
+                                                                  Colors.grey[
+                                                                      100]!,
+                                                              period:
+                                                                  const Duration(
+                                                                      milliseconds:
+                                                                          800),
+                                                              child: Container(
+                                                                color: Colors
+                                                                    .white,
+                                                              ),
+                                                            ),
+                                                            errorWidget:
+                                                                (context, url,
+                                                                        error) =>
+                                                                    Column(
+                                                              mainAxisAlignment:
+                                                                  MainAxisAlignment
+                                                                      .center,
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .center,
+                                                              children: [
+                                                                const Icon(
+                                                                    CupertinoIcons
+                                                                        .exclamationmark_circle_fill),
+                                                                const Text(
+                                                                    'Corrupt Image'),
+                                                                Text(value
+                                                                    .visualAids[
+                                                                        index]
+                                                                    .name!)
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      if (isSelected)
+                                                        Container(
+                                                          margin:
+                                                              EdgeInsets.only(
+                                                            right: 3,
+                                                          ),
+                                                          child: Icon(
+                                                            CupertinoIcons
+                                                                .check_mark_circled_solid,
+                                                            color: AppColors
+                                                                .primaryColor,
+                                                          ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                              childCount:
+                                                  value.visualAids.length,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : const EmptyWidget(),
+                            ),
+                            // Expanded(
+                            //     child: value.visualAids.isNotEmpty
+                            //         ? Container(
+                            //       margin: EdgeInsets.only(
+                            //           left: 10, right: 10, top: 5),
+                            //       child: GridView.builder(
+                            //         gridDelegate:
+                            //         SliverGridDelegateWithFixedCrossAxisCount(
+                            //           crossAxisCount: width ? 2 : 3,
+                            //         ),
+                            //         itemCount: value.visualAids.length,
+                            //         itemBuilder: (context, index) {
+                            //           return InkWell(
+                            //             onTap: () {
+                            //               Navigator.push(
+                            //                 context,
+                            //                 MaterialPageRoute(
+                            //                   builder: (context) => ImagePage(
+                            //                     images: value.visualAids,
+                            //                     initialIndex: index,
+                            //                   ),
+                            //                 ),
+                            //               );
+                            //             },
+                            //             child: Container(
+                            //               margin: EdgeInsets.only(
+                            //                   left: 10,
+                            //                   right: 10,
+                            //                   top: 5),
+                            //               decoration: BoxDecoration(
+                            //                 color: Colors.white,
+                            //                 borderRadius:
+                            //                 const BorderRadius.all(
+                            //                     Radius.circular(10)),
+                            //                 boxShadow: [
+                            //                   BoxShadow(
+                            //                     color: AppColors.primaryColor
+                            //                         .withOpacity(0.1),
+                            //                     spreadRadius: 0.5,
+                            //                     blurRadius: 2,
+                            //                     offset: const Offset(0, 0),
+                            //                   )
+                            //                 ],
+                            //               ),
+                            //               child: CachedNetworkImage(
+                            //                 imageUrl:
+                            //                 '${value.visualAids[index].url}',
+                            //                 imageBuilder:
+                            //                     (context, imageProvider) =>
+                            //                     Container(
+                            //                       decoration: BoxDecoration(
+                            //                         image: DecorationImage(
+                            //                           image: imageProvider,
+                            //                           fit: BoxFit.contain,
+                            //                         ),
+                            //                       ),
+                            //                     ),
+                            //                 placeholderFadeInDuration:
+                            //                 Duration(milliseconds: 10),
+                            //                 placeholder: (context, url) =>
+                            //                     Shimmer.fromColors(
+                            //                       baseColor: Colors.grey[300]!,
+                            //                       highlightColor:
+                            //                       Colors.grey[100]!,
+                            //                       child: Container(
+                            //                         color: Colors.white,
+                            //                         width: double.infinity,
+                            //                         height: double.infinity,
+                            //                       ),
+                            //                     ),
+                            //                 errorWidget: (context, url,
+                            //                     error) =>
+                            //                 const Icon(CupertinoIcons
+                            //                     .exclamationmark_circle_fill),
+                            //               ),
+                            //             ),
+                            //           );
+                            //         },
+                            //       ),
+                            //     )
+                            //         : const EmptyWidget()
+                            // ),
                           ],
                         ),
                       );
-                    },
-                    childCount: value.visualAids.length,
-                  ),
-                ),
-              ],
-            ),
-          )
-              : const EmptyWidget(),
-        ),
-      ],
-    );
+                  }
+                },
+              ));
   }
 
   String _getOptimizedImageUrl(String originalUrl, {int? width, int? height}) {
@@ -456,13 +1299,91 @@ class _VisualAidsScreenState extends State<VisualAidsScreen> {
       ..addAll({
         if (width != null) 'w': width.toString(),
         if (height != null) 'h': height.toString(),
-        'q': '70', // Reduced quality for faster loading
-        'auto': 'compress,format',
+        'q': '80',
+        //'auto': 'compress,format'// Reduce quality for thumbnails
       });
+
     return uri.replace(queryParameters: newParams).toString();
   }
 }
 
+@immutable
+class CustomNetworkImage extends ImageProvider<Uri> {
+  const CustomNetworkImage(this.url);
+
+  final String url;
+
+  @override
+  Future<Uri> obtainKey(ImageConfiguration configuration) {
+    final Uri result = Uri.parse(url).replace(
+      queryParameters: <String, String>{
+        'dpr': '${configuration.devicePixelRatio}',
+        'locale': '${configuration.locale?.toLanguageTag()}',
+        'platform': '${configuration.platform?.name}',
+        'width': '${configuration.size?.width}',
+        'height': '${configuration.size?.height}',
+        'bidi': '${configuration.textDirection?.name}',
+      },
+    );
+    return SynchronousFuture<Uri>(result);
+  }
+
+  static HttpClient get _httpClient {
+    HttpClient? client;
+    assert(() {
+      if (debugNetworkImageHttpClientProvider != null) {
+        client = debugNetworkImageHttpClientProvider!();
+      }
+      return true;
+    }());
+    return client ?? HttpClient()
+      ..autoUncompress = false;
+  }
+
+  @override
+  ImageStreamCompleter loadImage(Uri key, ImageDecoderCallback decode) {
+    final StreamController<ImageChunkEvent> chunkEvents =
+        StreamController<ImageChunkEvent>();
+    debugPrint('Fetching "$key"...');
+    return MultiFrameImageStreamCompleter(
+      codec: _httpClient
+          .getUrl(key)
+          .then<HttpClientResponse>(
+              (HttpClientRequest request) => request.close())
+          .then<Uint8List>((HttpClientResponse response) {
+            return consolidateHttpClientResponseBytes(
+              response,
+              onBytesReceived: (int cumulative, int? total) {
+                chunkEvents.add(ImageChunkEvent(
+                  cumulativeBytesLoaded: cumulative,
+                  expectedTotalBytes: total,
+                ));
+              },
+            );
+          })
+          .catchError((Object e, StackTrace stack) {
+            scheduleMicrotask(() {
+              PaintingBinding.instance.imageCache.evict(key);
+            });
+            return Future<Uint8List>.error(e, stack);
+          })
+          .whenComplete(chunkEvents.close)
+          .then<ui.ImmutableBuffer>(ui.ImmutableBuffer.fromUint8List)
+          .then<ui.Codec>(decode),
+      chunkEvents: chunkEvents.stream,
+      scale: 1.0,
+      debugLabel: '"key"',
+      informationCollector: () => <DiagnosticsNode>[
+        DiagnosticsProperty<ImageProvider>('Image provider', this),
+        DiagnosticsProperty<Uri>('URL', key),
+      ],
+    );
+  }
+
+  @override
+  String toString() =>
+      '${objectRuntimeType(this, 'CustomNetworkImage')}("$url")';
+}
 
 class ImagePage extends StatelessWidget {
   final dynamic images;
@@ -511,3 +1432,115 @@ class ImagePage extends StatelessWidget {
     }
   }
 }
+
+// void shareImageTitleAndContent(List<VisualAids> vi) async {
+//   try {
+//     String? imageUrl;
+//     List<XFile> image = [];
+//     // for (var element in vi ?? []) {
+//     //   if (element.type == "IMG") {
+//     //     imageUrl = element.url;
+//     //     break;
+//     //   }
+//     // }
+//     // print(imageUrl);
+//     // if (imageUrl == null) {
+//     //   // _shareWithoutImage(product);
+//     //   return;
+//     // }
+//     for (int i = 0; i < vi.length; i++) {
+//       final response = await http.get(Uri.parse("${vi[i].url}"));
+
+//       if (response.statusCode == 200) {
+//         final tempDir = await getTemporaryDirectory();
+//         final filePath = '${tempDir.path}/image.jpg';
+//         final imageFile = File(filePath);
+//         await imageFile.writeAsBytes(response.bodyBytes);
+
+//         image.add(XFile(filePath));
+//         // final title = product[0].name ?? 'No Title';
+//         // final description = product[0].details ?? '';
+//         // final typeName = product[0].typeName ?? '';
+//         // final price = product[0].packingVarient?[0].price ?? 0;
+
+//         // final text =
+//         //     '$title \nDescription: $description\nType: $typeName\nMRP: $price';
+//       } else {
+//         print('Failed to download image. Status code: ${response.statusCode}');
+//       }
+//     }
+
+//     Share.shareXFiles(
+//       image,
+//     );
+//   } catch (e) {
+//     print('Error: $e');
+//     // _shareWithoutImage(product);
+//   }
+// }
+
+// void shareImageTitleAndContent(List<VisualAids> vi) async {
+//   try {
+//     List<XFile> images = [];
+
+//     // Check if the list is empty or null
+//     if (vi.isEmpty) {
+//       print('No visual aids provided.');
+//       // Optionally call _shareWithoutImage(product);
+//       return;
+//     }
+
+//     // Iterate through visual aids to download images
+//     for (var i in vi) {
+//          final response = await http.get(Uri.parse(i.url.toString()));
+
+
+//       if (response.statusCode == 200) {
+//         final tempDir = await getTemporaryDirectory();
+//         // Use unique file names to avoid overwriting
+//         final filePath =
+//             '${tempDir.path}/image__${DateTime.now().millisecondsSinceEpoch}.jpg';
+//         final imageFile = File(filePath);
+//         await imageFile.writeAsBytes(response.bodyBytes);
+//         images.add(XFile(imageFile.path));
+//       } else {
+//         print(
+//             'Failed to download image from ${i.url}. Status code: ${response.statusCode}');
+//       }
+
+//     }
+//     // for (int i = 0; i < vi.length; i++) {
+
+//     //   final response = await http.get(Uri.parse(vi[i].url.toString()));
+
+
+//     //   if (response.statusCode == 200) {
+//     //     final tempDir = await getTemporaryDirectory();
+//     //     // Use unique file names to avoid overwriting
+//     //     final filePath =
+//     //         '${tempDir.path}/image_${i}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+//     //     final imageFile = File(filePath);
+//     //     await imageFile.writeAsBytes(response.bodyBytes);
+//     //     images.add(XFile(imageFile.path));
+//     //   } else {
+//     //     print(
+//     //         'Failed to download image from ${vi[i].url}. Status code: ${response.statusCode}');
+//     //   }
+//     // }
+
+//     // Share images if any were successfully downloaded
+//     if (images.isNotEmpty) {
+//       await Share.shareXFiles(
+//         images,
+//         // Optional: Add text to share
+//         // text: '$title\nDescription: $description\nType: $typeName\nMRP: $price',
+//       );
+//     } else {
+//       print('No images were downloaded successfully.');
+//       // Optionally call _shareWithoutImage(product);
+//     }
+//   } catch (e) {
+//     print('General error in shareImageTitleAndContent: $e');
+//     // Optionally call _shareWithoutImage(product);
+//   }
+// }
